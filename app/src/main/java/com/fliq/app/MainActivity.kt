@@ -1,14 +1,18 @@
 package com.fliq.app
 
 import android.app.AppOpsManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.VpnService
 import android.os.Bundle
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -18,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -30,12 +35,22 @@ class MainActivity : ComponentActivity() {
 
     private var isFliqActive = mutableStateOf(false)
     private var hasUsagePermission = mutableStateOf(false)
+    private var networkName = mutableStateOf("—")
+    private var signalStrength = mutableStateOf(0)
+    private var activeApp = mutableStateOf("—")
 
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            startFliq()
+        if (result.resultCode == RESULT_OK) startFliq()
+    }
+
+    // Receive updates from service
+    private val statusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            networkName.value = intent.getStringExtra("networkName") ?: "—"
+            signalStrength.value = intent.getIntExtra("signalStrength", 0)
+            activeApp.value = intent.getStringExtra("activeApp") ?: "—"
         }
     }
 
@@ -47,8 +62,13 @@ class MainActivity : ComponentActivity() {
                 FliqHomeScreen(
                     isActive = isFliqActive.value,
                     hasUsagePermission = hasUsagePermission.value,
+                    networkName = networkName.value,
+                    signalStrength = signalStrength.value,
+                    activeApp = activeApp.value,
                     onToggle = { toggleFliq() },
-                    onGrantPermission = { requestUsagePermission() }
+                    onGrantPermission = {
+                        startActivity(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    }
                 )
             }
         }
@@ -57,53 +77,51 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         hasUsagePermission.value = checkUsagePermission()
+        registerReceiver(
+            statusReceiver,
+            IntentFilter("com.fliq.app.STATUS_UPDATE"),
+            RECEIVER_NOT_EXPORTED
+        )
+    }
+
+    override fun onPause() {
+        super.onPause()
+        try { unregisterReceiver(statusReceiver) } catch (e: Exception) { }
     }
 
     private fun checkUsagePermission(): Boolean {
         val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
         val mode = appOps.checkOpNoThrow(
             AppOpsManager.OPSTR_GET_USAGE_STATS,
-            android.os.Process.myUid(),
-            packageName
+            android.os.Process.myUid(), packageName
         )
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
-    private fun requestUsagePermission() {
-        startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-    }
-
     private fun toggleFliq() {
-        if (isFliqActive.value) {
-            stopFliq()
-        } else {
-            requestVpnPermission()
-        }
+        if (isFliqActive.value) stopFliq() else requestVpnPermission()
     }
 
     private fun requestVpnPermission() {
         val intent = VpnService.prepare(this)
-        if (intent != null) {
-            vpnPermissionLauncher.launch(intent)
-        } else {
-            startFliq()
-        }
+        if (intent != null) vpnPermissionLauncher.launch(intent) else startFliq()
     }
 
     private fun startFliq() {
-        val intent = Intent(this, FliqVpnService::class.java).apply {
+        startForegroundService(Intent(this, FliqVpnService::class.java).apply {
             action = FliqVpnService.ACTION_START
-        }
-        startForegroundService(intent)
+        })
         isFliqActive.value = true
     }
 
     private fun stopFliq() {
-        val intent = Intent(this, FliqVpnService::class.java).apply {
+        startService(Intent(this, FliqVpnService::class.java).apply {
             action = FliqVpnService.ACTION_STOP
-        }
-        startService(intent)
+        })
         isFliqActive.value = false
+        networkName.value = "—"
+        signalStrength.value = 0
+        activeApp.value = "—"
     }
 }
 
@@ -111,44 +129,60 @@ class MainActivity : ComponentActivity() {
 fun FliqHomeScreen(
     isActive: Boolean,
     hasUsagePermission: Boolean,
+    networkName: String,
+    signalStrength: Int,
+    activeApp: String,
     onToggle: () -> Unit,
     onGrantPermission: () -> Unit
 ) {
+    val bgColor = Color(0xFF0A0A0A)
+    val accentColor = if (isActive) Color(0xFF00E676) else Color(0xFF333333)
+    val animatedAccent by animateColorAsState(
+        targetValue = accentColor,
+        animationSpec = tween(600), label = "accent"
+    )
+    val buttonScale by animateFloatAsState(
+        targetValue = if (isActive) 1.05f else 1f,
+        animationSpec = tween(300), label = "scale"
+    )
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0A0A0A))
+            .background(bgColor)
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(32.dp)
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
+
+            // App name
             Text(
                 text = "fliq",
-                fontSize = 36.sp,
+                fontSize = 40.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
-                letterSpacing = 4.sp
+                letterSpacing = 6.sp
             )
 
+            // Status text
             Text(
-                text = if (isActive) "Network optimized" else "Tap to activate",
-                fontSize = 16.sp,
-                color = if (isActive) Color(0xFF00E676) else Color(0xFF888888)
+                text = if (isActive) "Your network is optimized" else "Tap to activate Fliq",
+                fontSize = 14.sp,
+                color = if (isActive) Color(0xFF00E676) else Color(0xFF666666)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             // Power button
             Box(
                 modifier = Modifier
                     .size(180.dp)
+                    .scale(buttonScale)
                     .clip(CircleShape)
-                    .background(
-                        if (isActive) Color(0xFF00E676) else Color(0xFF1E1E1E)
-                    ),
+                    .background(animatedAccent),
                 contentAlignment = Alignment.Center
             ) {
                 Button(
@@ -164,34 +198,41 @@ fun FliqHomeScreen(
                         text = if (isActive) "ON" else "OFF",
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isActive) Color(0xFF0A0A0A) else Color(0xFF555555)
+                        color = if (isActive) Color(0xFF0A0A0A) else Color(0xFF666666)
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Status cards
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatusCard(
-                    title = "Network",
-                    value = if (isActive) "Optimal" else "—",
+            // Live stats row
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                StatCard(
+                    label = "Network",
+                    value = networkName,
                     isActive = isActive
                 )
-                StatusCard(
-                    title = "Background",
-                    value = if (isActive) "Throttled" else "—",
+                StatCard(
+                    label = "Signal",
+                    value = if (isActive) signalBars(signalStrength) else "—",
+                    isActive = isActive
+                )
+                StatCard(
+                    label = "Active app",
+                    value = activeApp,
                     isActive = isActive
                 )
             }
 
-            // Usage permission banner
+            // Permission banner
             if (!hasUsagePermission) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF1A1A2E)
+                        containerColor = Color(0xFF1A1A1A)
                     )
                 ) {
                     Column(
@@ -199,13 +240,13 @@ fun FliqHomeScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "Enable app detection",
+                            "Enable app detection",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                         Text(
-                            text = "Let Fliq detect when you're on a video call or streaming to prioritize your bandwidth.",
+                            "Fliq needs permission to detect active apps and prioritize bandwidth for calls and streams.",
                             fontSize = 12.sp,
                             color = Color(0xFF888888),
                             textAlign = TextAlign.Start
@@ -218,9 +259,8 @@ fun FliqHomeScreen(
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
-                                text = "Grant Permission",
+                                "Grant Permission",
                                 color = Color(0xFF0A0A0A),
-                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -232,29 +272,41 @@ fun FliqHomeScreen(
 }
 
 @Composable
-fun StatusCard(title: String, value: String, isActive: Boolean) {
+fun StatCard(label: String, value: String, isActive: Boolean) {
     Card(
-        modifier = Modifier.width(150.dp),
+        modifier = Modifier.width(110.dp),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = Color(0xFF1E1E1E)
+            containerColor = Color(0xFF1A1A1A)
         )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
-                text = title,
-                fontSize = 12.sp,
-                color = Color(0xFF888888)
+                text = label,
+                fontSize = 11.sp,
+                color = Color(0xFF666666)
             )
             Text(
                 text = value,
-                fontSize = 16.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = if (isActive) Color(0xFF00E676) else Color(0xFF555555)
+                color = if (isActive) Color(0xFF00E676) else Color(0xFF444444),
+                maxLines = 1
             )
         }
+    }
+}
+
+fun signalBars(strength: Int): String {
+    return when (strength) {
+        0 -> "▂___"
+        1 -> "▂▄__"
+        2 -> "▂▄▆_"
+        3 -> "▂▄▆█"
+        4 -> "▂▄▆█"
+        else -> "—"
     }
 }

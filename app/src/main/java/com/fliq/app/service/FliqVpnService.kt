@@ -173,6 +173,13 @@ class FliqVpnService : VpnService() {
             }
 
             updateNotification(notifText)
+            // Broadcast status to UI
+            val broadcastIntent = Intent("com.fliq.app.STATUS_UPDATE").apply {
+                putExtra("networkName", networkStatus.networkName)
+                putExtra("signalStrength", networkStatus.signalStrength)
+                putExtra("activeApp", activeApp.appName)
+            }
+            sendBroadcast(broadcastIntent)
 
         } catch (e: Exception) {
             Log.e(TAG, "Error during scan: ${e.message}")
