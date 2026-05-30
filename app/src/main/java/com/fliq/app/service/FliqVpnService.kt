@@ -32,6 +32,7 @@ class FliqVpnService : VpnService() {
 
     private lateinit var networkMonitor: NetworkMonitor
     private lateinit var appDetector: AppDetector
+    private lateinit var locationLearner: LocationLearner
 
     private val handler = Handler(Looper.getMainLooper())
     private var currentNotificationText = "Optimizing your network..."
@@ -49,6 +50,7 @@ class FliqVpnService : VpnService() {
         super.onCreate()
         networkMonitor = NetworkMonitor(this)
         appDetector = AppDetector(this)
+        locationLearner = LocationLearner(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -149,8 +151,15 @@ class FliqVpnService : VpnService() {
 
     private fun scanAndOptimize() {
         try {
-            val networkStatus = networkMonitor.getCurrentStatus()
             val activeApp = appDetector.getActiveApp()
+            val networkStatus = networkMonitor.getCurrentStatus()
+            // Learn this location
+            locationLearner.saveNetworkForLocation(
+                networkStatus.networkName,
+                networkStatus.type.name,
+                networkStatus.signalStrength
+            )
+
 
             Log.d(TAG, "Scan — Network: ${networkStatus.networkName} " +
                     "| Signal: ${networkStatus.signalStrength} " +
