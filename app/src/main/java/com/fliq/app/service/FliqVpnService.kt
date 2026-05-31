@@ -78,10 +78,10 @@ class FliqVpnService : VpnService() {
                 .addAddress("10.0.0.2", 32)
                 .addDnsServer("8.8.8.8")
                 .addDnsServer("8.8.4.4")
-                .addRoute("0.0.0.0", 0)
+                .addRoute("240.0.0.0", 4)
                 .setMtu(1500)
 
-            // Exclude all major apps — Fliq monitors but doesn't block
+            // Exclude all apps — Fliq monitors but doesn't block anything
             builder.addDisallowedApplication(packageName)
             builder.addDisallowedApplication("com.google.android.youtube")
             builder.addDisallowedApplication("com.android.chrome")
@@ -98,8 +98,8 @@ class FliqVpnService : VpnService() {
             builder.addDisallowedApplication("com.instagram.android")
             builder.addDisallowedApplication("com.twitter.android")
             builder.addDisallowedApplication("com.facebook.katana")
-            builder.addDisallowedApplication("com.samsung.android.app.notes")
             builder.addDisallowedApplication("com.sec.android.app.sbrowser")
+            builder.addDisallowedApplication("com.spotify.music")
 
             vpnInterface = builder.establish()
             isRunning = true

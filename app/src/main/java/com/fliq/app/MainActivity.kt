@@ -1,12 +1,15 @@
 package com.fliq.app
 
+import android.Manifest
 import android.app.AppOpsManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.fliq.app.service.FliqVpnService
 import com.fliq.app.ui.theme.FliqTheme
 
@@ -45,7 +49,15 @@ class MainActivity : ComponentActivity() {
         if (result.resultCode == RESULT_OK) startFliq()
     }
 
-    // Receive updates from service
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        if (granted) {
+            Log.d("MainActivity", "Location permission granted — WiFi name now readable")
+        }
+    }
+
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             networkName.value = intent.getStringExtra("networkName") ?: "—"
@@ -57,6 +69,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         hasUsagePermission.value = checkUsagePermission()
+        requestLocationPermission()
         setContent {
             FliqTheme {
                 FliqHomeScreen(
@@ -87,6 +100,20 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         try { unregisterReceiver(statusReceiver) } catch (e: Exception) { }
+    }
+
+    private fun requestLocationPermission() {
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
     }
 
     private fun checkUsagePermission(): Boolean {
@@ -135,7 +162,6 @@ fun FliqHomeScreen(
     onToggle: () -> Unit,
     onGrantPermission: () -> Unit
 ) {
-    val bgColor = Color(0xFF0A0A0A)
     val accentColor = if (isActive) Color(0xFF00E676) else Color(0xFF333333)
     val animatedAccent by animateColorAsState(
         targetValue = accentColor,
@@ -149,7 +175,7 @@ fun FliqHomeScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(bgColor)
+            .background(Color(0xFF0A0A0A))
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -157,8 +183,6 @@ fun FliqHomeScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-
-            // App name
             Text(
                 text = "fliq",
                 fontSize = 40.sp,
@@ -167,7 +191,6 @@ fun FliqHomeScreen(
                 letterSpacing = 6.sp
             )
 
-            // Status text
             Text(
                 text = if (isActive) "Your network is optimized" else "Tap to activate Fliq",
                 fontSize = 14.sp,
@@ -176,7 +199,6 @@ fun FliqHomeScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Power button
             Box(
                 modifier = Modifier
                     .size(180.dp)
@@ -205,28 +227,16 @@ fun FliqHomeScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Live stats row
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                StatCard(
-                    label = "Network",
-                    value = networkName,
-                    isActive = isActive
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatCard(label = "Network", value = networkName, isActive = isActive)
                 StatCard(
                     label = "Signal",
                     value = if (isActive) signalBars(signalStrength) else "—",
                     isActive = isActive
                 )
-                StatCard(
-                    label = "Active app",
-                    value = activeApp,
-                    isActive = isActive
-                )
+                StatCard(label = "Active app", value = activeApp, isActive = isActive)
             }
 
-            // Permission banner
             if (!hasUsagePermission) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
