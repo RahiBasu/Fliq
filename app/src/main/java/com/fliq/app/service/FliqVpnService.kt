@@ -33,6 +33,7 @@ class FliqVpnService : VpnService() {
     private lateinit var networkMonitor: NetworkMonitor
     private lateinit var appDetector: AppDetector
     private lateinit var locationLearner: LocationLearner
+    private lateinit var focusMode: FocusMode
 
     private val handler = Handler(Looper.getMainLooper())
     private var currentNotificationText = "Optimizing your network..."
@@ -51,6 +52,7 @@ class FliqVpnService : VpnService() {
         networkMonitor = NetworkMonitor(this)
         appDetector = AppDetector(this)
         locationLearner = LocationLearner(this)
+        focusMode = FocusMode(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -67,6 +69,22 @@ class FliqVpnService : VpnService() {
                 stopSelf()
                 START_NOT_STICKY
             }
+            "ACTION_FOCUS_EXAM" -> {
+                focusMode.activate(FocusModeType.EXAM)
+                START_STICKY
+            }
+            "ACTION_FOCUS_INTERVIEW" -> {
+                focusMode.activate(FocusModeType.INTERVIEW)
+                START_STICKY
+            }
+            "ACTION_FOCUS_CALL" -> {
+                focusMode.activate(FocusModeType.CALL)
+                START_STICKY
+            }
+            "ACTION_FOCUS_OFF" -> {
+                focusMode.deactivate()
+                START_STICKY
+            }
             else -> START_STICKY
         }
     }
@@ -81,7 +99,6 @@ class FliqVpnService : VpnService() {
                 .addRoute("240.0.0.0", 4)
                 .setMtu(1500)
 
-            // Exclude all apps — Fliq monitors but doesn't block anything
             builder.addDisallowedApplication(packageName)
             builder.addDisallowedApplication("com.google.android.youtube")
             builder.addDisallowedApplication("com.android.chrome")
@@ -105,18 +122,15 @@ class FliqVpnService : VpnService() {
             isRunning = true
             Log.d(TAG, "Fliq VPN tunnel established ✅")
 
-            // Start packet forwarding in background thread
             forwardingThread = Thread {
                 forwardPackets()
             }.also { it.start() }
 
-            // Start network monitoring
             networkMonitor.startMonitoring { status ->
                 Log.d(TAG, "Network changed: ${status.networkName} strength: ${status.signalStrength}")
                 updateNotification("Connected via ${status.networkName}")
             }
 
-            // Start scanning loop
             handler.post(scanTask)
 
         } catch (e: Exception) {
@@ -153,20 +167,20 @@ class FliqVpnService : VpnService() {
         try {
             val activeApp = appDetector.getActiveApp()
             val networkStatus = networkMonitor.getCurrentStatus()
-            // Learn this location
+
             locationLearner.saveNetworkForLocation(
                 networkStatus.networkName,
                 networkStatus.type.name,
                 networkStatus.signalStrength
             )
 
-
             Log.d(TAG, "Scan — Network: ${networkStatus.networkName} " +
                     "| Signal: ${networkStatus.signalStrength} " +
                     "| Active app: ${activeApp.appName} " +
-                    "| Category: ${activeApp.category}")
+                    "| Focus: ${focusMode.currentMode}")
 
             val notifText = when {
+                focusMode.isActive() -> focusMode.getNotificationText()
                 appDetector.shouldPrioritize(activeApp) -> {
                     "Priority mode: ${activeApp.appName} gets full bandwidth"
                 }
@@ -176,17 +190,16 @@ class FliqVpnService : VpnService() {
                 networkStatus.signalStrength in 1..2 -> {
                     "Weak signal — monitoring for better network"
                 }
-                else -> {
-                    "Scanning for best network..."
-                }
+                else -> "Scanning for best network..."
             }
 
             updateNotification(notifText)
-            // Broadcast status to UI
+
             val broadcastIntent = Intent("com.fliq.app.STATUS_UPDATE").apply {
                 putExtra("networkName", networkStatus.networkName)
                 putExtra("signalStrength", networkStatus.signalStrength)
                 putExtra("activeApp", activeApp.appName)
+                putExtra("focusMode", focusMode.currentMode.name)
             }
             sendBroadcast(broadcastIntent)
 
@@ -218,13 +231,10 @@ class FliqVpnService : VpnService() {
 
     private fun buildNotification(text: String): Notification {
         createNotificationChannel()
-
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_IMMUTABLE
+            this, 0, intent, PendingIntent.FLAG_IMMUTABLE
         )
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Fliq is active")
             .setContentText(text)
@@ -236,14 +246,9 @@ class FliqVpnService : VpnService() {
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Fliq Network Service",
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = "Keeps Fliq running in the background"
-        }
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(channel)
+            CHANNEL_ID, "Fliq Network Service", NotificationManager.IMPORTANCE_LOW
+        ).apply { description = "Keeps Fliq running in the background" }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
     override fun onDestroy() {

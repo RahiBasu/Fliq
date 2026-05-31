@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
     private var networkName = mutableStateOf("—")
     private var signalStrength = mutableStateOf(0)
     private var activeApp = mutableStateOf("—")
+    private var focusMode = mutableStateOf("OFF")
 
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -53,9 +54,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
-        if (granted) {
-            Log.d("MainActivity", "Location permission granted — WiFi name now readable")
-        }
+        if (granted) Log.d("MainActivity", "Location permission granted")
     }
 
     private val statusReceiver = object : BroadcastReceiver() {
@@ -63,6 +62,7 @@ class MainActivity : ComponentActivity() {
             networkName.value = intent.getStringExtra("networkName") ?: "—"
             signalStrength.value = intent.getIntExtra("signalStrength", 0)
             activeApp.value = intent.getStringExtra("activeApp") ?: "—"
+            focusMode.value = intent.getStringExtra("focusMode") ?: "OFF"
         }
     }
 
@@ -78,9 +78,15 @@ class MainActivity : ComponentActivity() {
                     networkName = networkName.value,
                     signalStrength = signalStrength.value,
                     activeApp = activeApp.value,
+                    focusMode = focusMode.value,
                     onToggle = { toggleFliq() },
                     onGrantPermission = {
                         startActivity(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    },
+                    onFocusMode = { mode ->
+                        startService(Intent(this, FliqVpnService::class.java).apply {
+                            action = "ACTION_FOCUS_$mode"
+                        })
                     }
                 )
             }
@@ -149,6 +155,7 @@ class MainActivity : ComponentActivity() {
         networkName.value = "—"
         signalStrength.value = 0
         activeApp.value = "—"
+        focusMode.value = "OFF"
     }
 }
 
@@ -159,8 +166,10 @@ fun FliqHomeScreen(
     networkName: String,
     signalStrength: Int,
     activeApp: String,
+    focusMode: String,
     onToggle: () -> Unit,
-    onGrantPermission: () -> Unit
+    onGrantPermission: () -> Unit,
+    onFocusMode: (String) -> Unit
 ) {
     val accentColor = if (isActive) Color(0xFF00E676) else Color(0xFF333333)
     val animatedAccent by animateColorAsState(
@@ -237,6 +246,39 @@ fun FliqHomeScreen(
                 StatCard(label = "Active app", value = activeApp, isActive = isActive)
             }
 
+            // Focus mode buttons
+            if (isActive) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Focus mode",
+                    fontSize = 12.sp,
+                    color = Color(0xFF666666)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FocusButton(
+                        label = "Exam",
+                        isSelected = focusMode == "EXAM",
+                        onClick = {
+                            onFocusMode(if (focusMode == "EXAM") "OFF" else "EXAM")
+                        }
+                    )
+                    FocusButton(
+                        label = "Interview",
+                        isSelected = focusMode == "INTERVIEW",
+                        onClick = {
+                            onFocusMode(if (focusMode == "INTERVIEW") "OFF" else "INTERVIEW")
+                        }
+                    )
+                    FocusButton(
+                        label = "Call",
+                        isSelected = focusMode == "CALL",
+                        onClick = {
+                            onFocusMode(if (focusMode == "CALL") "OFF" else "CALL")
+                        }
+                    )
+                }
+            }
+
             if (!hasUsagePermission) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -286,19 +328,13 @@ fun StatCard(label: String, value: String, isActive: Boolean) {
     Card(
         modifier = Modifier.width(110.dp),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color(0xFF1A1A1A)
-        )
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(
-                text = label,
-                fontSize = 11.sp,
-                color = Color(0xFF666666)
-            )
+            Text(text = label, fontSize = 11.sp, color = Color(0xFF666666))
             Text(
                 text = value,
                 fontSize = 13.sp,
@@ -307,6 +343,25 @@ fun StatCard(label: String, value: String, isActive: Boolean) {
                 maxLines = 1
             )
         }
+    }
+}
+
+@Composable
+fun FocusButton(label: String, isSelected: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (isSelected) Color(0xFF00E676) else Color(0xFF1A1A1A)
+        ),
+        shape = RoundedCornerShape(12.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (isSelected) Color(0xFF0A0A0A) else Color(0xFF888888)
+        )
     }
 }
 
